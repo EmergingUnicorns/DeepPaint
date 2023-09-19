@@ -238,13 +238,27 @@ class HumanParser:
             logits_result = transform_logits(upsample_output.data.cpu().numpy(), c, s, w, h, input_size=self.input_size)
             parsing_result = np.argmax(logits_result, axis=2)
             parsing_result_path = os.path.join(self.output_dir, img_name[:-4] + '.png')
+            
             output_img = Image.fromarray(np.asarray(parsing_result, dtype=np.uint8))
+            mask = np.zeros((h,w,3), dtype = np.uint8) + [1,1,1]
+            print (parsing_result.shape)
+            print (parsing_result)
+            mask[parsing_result == 0] = [0,0,0]
+
+            final_img = img * mask
+            cv2.imwrite("./img.jpg", final_img)
+
+            mask1 = np.zeros((h,w,3), dtype = np.uint8)
+            mask1[parsing_result == 4] = [1,1,1]
+            cv2.imwrite("./mask0.png", mask1 * 255.0)
+            exit()
             output_img.putpalette(self.palette)
             output_img.save(parsing_result_path)
 
 def main():
-    image_path = "./inputs/1.jpeg"
+    image_path = "./A1.jpg"
     img = cv2.imread(image_path,cv2.IMREAD_COLOR)
+    img = cv2.resize(img, (512,512))
     hp = HumanParser()
     hp.infer(img)
 

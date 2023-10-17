@@ -10,7 +10,7 @@ import torchvision.transforms as transforms
 
 import cv2
 
-import networks
+import HumanParser.networks as networks
 
 dataset_settings = {
     'lip': {

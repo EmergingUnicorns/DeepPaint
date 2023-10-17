@@ -246,23 +246,35 @@ class HumanParser:
             mask[parsing_result == 0] = [0,0,0]
 
             final_img = img * mask
-            cv2.imwrite("./img.jpg", final_img)
+            # cv2.imwrite("./img.jpg", final_img)
 
             mask1 = np.zeros((h,w,3), dtype = np.uint8)
             mask1[parsing_result == 4] = [1,1,1]
-            cv2.imwrite("./mask0.png", mask1 * 255.0)
-            exit()
-            output_img.putpalette(self.palette)
-            output_img.save(parsing_result_path)
+            # cv2.imwrite("./mask0.png", mask1 * 255.0)
 
-def main():
-    image_path = "./A1.jpg"
+            # output_img.putpalette(self.palette)
+            # output_img.save(parsing_result_path)
+
+            return final_img, mask1 * 255.0
+
+def MakeDir(path):
+    if (not os.path.exists(path)):
+        os.mkdir(path)
+
+
+def debug():
+    print ("Debugging Human Parsing!")
+    MakeDir("./DebugOutput/")
+    MakeDir("./DebugOutput/HumanParser/")
+    image_path = "./DebugImages/Images/img1.jpg"
     img = cv2.imread(image_path,cv2.IMREAD_COLOR)
     img = cv2.resize(img, (512,512))
     hp = HumanParser()
-    hp.infer(img)
-
+    final_img, mask = hp.infer(img)
+    cv2.imwrite("./DebugOutput/HumanParser/FinalImg.jpg", final_img)
+    cv2.imwrite("./DebugOutput/HumanParser/Mask.jpg", mask)
+    print ("Done!!!")
 
 
 if __name__ == '__main__':
-    main()
+    debug()

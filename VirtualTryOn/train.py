@@ -306,6 +306,26 @@ class VirtualTryOnTrain:
         )
 
     def train(self):
+        print ("\n" * 3)        
+        print ("-------------------------- TRAINING ----------------------------------------")
+        # Train!
+        total_batch_size = self.args.train_batch_size * self.accelerator.num_processes * self.args.gradient_accumulation_steps
+
+        self.logger.info("***** Running training *****")
+        self.logger.info(f"  Num examples = {len(self.train_dataset)}")
+        self.logger.info(f"  Num batches each epoch = {len(self.train_dataloader)}")
+        self.logger.info(f"  Num Epochs = {self.args.num_train_epochs}")
+        self.logger.info(f"  Instantaneous batch size per device = {self.args.train_batch_size}")
+        self.logger.info(f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}")
+        self.logger.info(f"  Gradient Accumulation steps = {self.args.gradient_accumulation_steps}")
+        self.logger.info(f"  Total optimization steps = {self.args.max_train_steps}")
+
+        global_step = 0
+        first_epoch = 0
+
+        
+
+
         pass
 
 t = VirtualTryOnTrain()

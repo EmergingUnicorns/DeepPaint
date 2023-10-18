@@ -3,6 +3,13 @@ class DotDict(dict):
     def __getattr__(self, attr):
         return self[attr]
 
+    def __setattr__(self, key, value):
+        self[key] = value
+
+    def __delattr__(self, item):
+        del self[item]
+        
+    
 '''
     :: Default Parameters ::
 
@@ -48,7 +55,7 @@ class DotDict(dict):
     
 '''
 def get_config_default():
-    d = DotDict({})
+    d = DotDict()
     d.pretrained_model_name_or_path = None
     d.tokenizer_name = None
     d.instance_data_dir = None

@@ -102,7 +102,139 @@ class VirtualTryOnTrain:
 
             self.load_tokenizer()
             self.load_models()
+            self.init_opt_and_lr()
+            self.init_lr_scheduler()
 
+            if self.args.train_text_encoder:
+                self.unet, self.text_encoder, self.optimizer, self.train_dataloader, self.lr_scheduler = self.accelerator.prepare(
+                    self.unet, self.text_encoder, self.optimizer, self.train_dataloader, self.lr_scheduler
+                )
+            else:
+                self.unet, self.optimizer, self.train_dataloader, self.lr_scheduler = self.accelerator.prepare(
+                    self.unet, self.optimizer, self.train_dataloader, self.lr_scheduler
+                )
+            self.accelerator.register_for_checkpointing(self.lr_scheduler)
+
+            weight_dtype = torch.float32
+            if args.mixed_precision == "fp16":
+                weight_dtype = torch.float16
+            elif args.mixed_precision == "bf16":
+                weight_dtype = torch.bfloat16
+
+            self.vae.to(self.accelerator.device, dtype=weight_dtype)
+            if not self.args.train_text_encoder:
+                self.text_encoder.to(self.accelerator.device, dtype=weight_dtype)
+
+
+            num_update_steps_per_epoch = math.ceil(len(self.train_dataloader) / args.gradient_accumulation_steps)
+            if self.overrode_max_train_steps:
+                self.args.max_train_steps = self.args.num_train_epochs * num_update_steps_per_epoch
+            self.args.num_train_epochs = math.ceil(self.args.max_train_steps / num_update_steps_per_epoch)
+
+            # We need to initialize the trackers we use, and also store our configuration.
+            # The trackers initializes automatically on the main process.
+            if self.accelerator.is_main_process:
+                self.accelerator.init_trackers("dreambooth", config=vars(self.args))
+
+
+    def init_lr_scheduler(self):
+        # Scheduler and math around the number of training steps.
+        overrode_max_train_steps = False
+        num_update_steps_per_epoch = math.ceil(len(self.train_dataloader) / self.args.gradient_accumulation_steps)
+        if self.args.max_train_steps is None:
+            self.args.max_train_steps = self.args.num_train_epochs * num_update_steps_per_epoch
+            overrode_max_train_steps = True
+
+        self.lr_scheduler = get_scheduler(
+            self.args.lr_scheduler,
+            optimizer=self.optimizer,
+            num_warmup_steps=self.args.lr_warmup_steps * self.args.gradient_accumulation_steps,
+            num_training_steps=self.args.max_train_steps * self.args.gradient_accumulation_steps,
+        )
+
+
+
+    def initialize_dreambooth_loaders(self):
+        train_dataset = DreamBoothDataset(
+            instance_data_root=self.args.instance_data_dir,
+            instance_prompt=self.args.instance_prompt,
+            class_data_root=self.args.class_data_dir if self.args.with_prior_preservation else None,
+            class_prompt=self.args.class_prompt,
+            tokenizer=self.tokenizer,
+            size=self.args.resolution,
+            center_crop=self.args.center_crop,
+        )
+
+        def collate_fn(examples):
+            input_ids = [example["instance_prompt_ids"] for example in examples]
+            pixel_values = [example["instance_images"] for example in examples]
+
+            if self.args.with_prior_preservation:
+                input_ids += [example["class_prompt_ids"] for example in examples]
+                pixel_values += [example["class_images"] for example in examples]
+                pior_pil = [example["class_PIL_images"] for example in examples]
+
+            masks = []
+            masked_images = []
+            for example in examples:
+                pil_image = example["PIL_images"]
+                mask = random_mask(pil_image.size, 1, False) # generate a random mask
+                mask, masked_image = prepare_mask_and_masked_image(pil_image, mask)  # prepare mask and masked image
+                masks.append(mask)
+                masked_images.append(masked_image)
+
+            if self.args.with_prior_preservation:
+                for pil_image in pior_pil:
+                    mask = random_mask(pil_image.size, 1, False)
+                    mask, masked_image = prepare_mask_and_masked_image(pil_image, mask)
+                    masks.append(mask)
+                    masked_images.append(masked_image)
+
+            pixel_values = torch.stack(pixel_values)
+            pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
+
+            input_ids = self.tokenizer.pad({"input_ids": input_ids}, padding=True, return_tensors="pt").input_ids
+            masks = torch.stack(masks)
+            masked_images = torch.stack(masked_images)
+            batch = {"input_ids": input_ids, "pixel_values": pixel_values, "masks": masks, "masked_images": masked_images}
+            return batch
+
+
+        self.train_dataloader = torch.utils.data.DataLoader(
+            train_dataset, batch_size=self.args.train_batch_size, shuffle=True, collate_fn=collate_fn
+        )
+
+
+
+    def init_opt_and_lr(self):
+        if self.args.scale_lr:
+            self.args.learning_rate = (
+                self.args.learning_rate * self.args.gradient_accumulation_steps * self.args.train_batch_size * self.accelerator.num_processes
+            )
+
+        # Use 8-bit Adam for lower memory usage or to fine-tune the model in 16GB GPUs
+        if self.args.use_8bit_adam:
+            try:
+                import bitsandbytes as bnb
+            except ImportError:
+                raise ImportError(
+                    "To use 8-bit Adam, please install the bitsandbytes library: `pip install bitsandbytes`."
+                )
+
+            optimizer_class = bnb.optim.AdamW8bit
+        else:
+            optimizer_class = torch.optim.AdamW
+
+        params_to_optimize = (
+            itertools.chain(self.unet.parameters(), self.text_encoder.parameters()) if self.args.train_text_encoder else self.unet.parameters()
+        )
+        self.optimizer = optimizer_class(
+            params_to_optimize,
+            lr=self.args.learning_rate,
+            betas=(self.args.adam_beta1, self.args.adam_beta2),
+            weight_decay=self.args.adam_weight_decay,
+            eps=self.args.adam_epsilon,
+        )
 
     def load_tokenizer(self):
         if self.args.tokenizer_name:
@@ -118,6 +250,11 @@ class VirtualTryOnTrain:
         self.vae.requires_grad_(False)
         if not self.args.train_text_encoder:
             self.text_encoder.requires_grad_(False)
+
+        if self.args.gradient_checkpointing:
+            self.unet.enable_gradient_checkpointing()
+            if self.args.train_text_encoder:
+                self.text_encoder.gradient_checkpointing_enable()
 
 
     def generate_class_images(self, cur_class_images, class_images_dir):

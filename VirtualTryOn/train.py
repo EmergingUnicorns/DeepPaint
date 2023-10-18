@@ -91,7 +91,7 @@ class VirtualTryOnTrain:
             print ("--------------------------------------------------------")
 
             # Handle the repository creation
-            if accelerator.is_main_process:
+            if self.accelerator.is_main_process:
                 if args.output_dir is not None:
                     os.makedirs(args.output_dir, exist_ok=True)
 
@@ -99,6 +99,26 @@ class VirtualTryOnTrain:
                     repo_id = create_repo(
                         repo_id=args.hub_model_id or Path(args.output_dir).name, exist_ok=True, token=args.hub_token
                     ).repo_id
+
+            self.load_tokenizer()
+            self.load_models()
+
+
+    def load_tokenizer(self):
+        if self.args.tokenizer_name:
+            self.tokenizer = CLIPTokenizer.from_pretrained(self.args.tokenizer_name)
+        elif self.args.pretrained_model_name_or_path:
+            self.tokenizer = CLIPTokenizer.from_pretrained(self.args.pretrained_model_name_or_path, subfolder="tokenizer")
+
+    def load_models(self):
+        self.text_encoder = CLIPTextModel.from_pretrained(self.args.pretrained_model_name_or_path, subfolder="text_encoder")
+        self.vae = AutoencoderKL.from_pretrained(self.args.pretrained_model_name_or_path, subfolder="vae")
+        self.unet = UNet2DConditionModel.from_pretrained(self.args.pretrained_model_name_or_path, subfolder="unet")
+
+        self.vae.requires_grad_(False)
+        if not self.args.train_text_encoder:
+            self.text_encoder.requires_grad_(False)
+
 
     def generate_class_images(self, cur_class_images, class_images_dir):
         torch_dtype = torch.float16 if self.accelerator.device.type == "cuda" else torch.float32

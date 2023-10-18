@@ -115,15 +115,15 @@ class VirtualTryOnTrain:
                 )
             self.accelerator.register_for_checkpointing(self.lr_scheduler)
 
-            weight_dtype = torch.float32
+            self.weight_dtype = torch.float32
             if args.mixed_precision == "fp16":
-                weight_dtype = torch.float16
+                self.weight_dtype = torch.float16
             elif args.mixed_precision == "bf16":
-                weight_dtype = torch.bfloat16
+                self.weight_dtype = torch.bfloat16
 
-            self.vae.to(self.accelerator.device, dtype=weight_dtype)
+            self.vae.to(self.accelerator.device, dtype=self.weight_dtype)
             if not self.args.train_text_encoder:
-                self.text_encoder.to(self.accelerator.device, dtype=weight_dtype)
+                self.text_encoder.to(self.accelerator.device, dtype=self.weight_dtype)
 
 
             num_update_steps_per_epoch = math.ceil(len(self.train_dataloader) / args.gradient_accumulation_steps)
@@ -323,7 +323,110 @@ class VirtualTryOnTrain:
         global_step = 0
         first_epoch = 0
 
-        
+        progress_bar = tqdm(range(global_step, self.args.max_train_steps), disable=not self.accelerator.is_local_main_process)
+        progress_bar.set_description("Steps")
+
+        for epoch in range(first_epoch, self.args.num_train_epochs):
+            self.unet.train()
+            for step, batch in enumerate(self.train_dataloader):
+                with self.accelerator.accumulate(self.unet):
+                    # Convert images to latent space
+                    latents = self.vae.encode(batch["pixel_values"].to(dtype=self.weight_dtype)).latent_dist.sample()
+                    latents = latents * self.vae.config.scaling_factor
+
+                    # Convert masked images to latent space
+                    masked_latents = self.vae.encode(
+                        batch["masked_images"].reshape(batch["pixel_values"].shape).to(dtype=self.weight_dtype)
+                    ).latent_dist.sample()
+                    masked_latents = masked_latents * self.vae.config.scaling_factor
+
+                    masks = batch["masks"]
+                    # resize the mask to latents shape as we concatenate the mask to the latents
+                    mask = torch.stack(
+                        [
+                            torch.nn.functional.interpolate(mask, size=(self.args.resolution // 8, self.args.resolution // 8))
+                            for mask in masks
+                        ]
+                    )
+                    mask = mask.reshape(-1, 1, self.args.resolution // 8, self.args.resolution // 8)
+
+                    # Sample noise that we'll add to the latents
+                    noise = torch.randn_like(latents)
+                    bsz = latents.shape[0]
+                    # Sample a random timestep for each image
+                    timesteps = torch.randint(0, self.noise_scheduler.config.num_train_timesteps, (bsz,), device=latents.device)
+                    timesteps = timesteps.long()
+
+                    # Add noise to the latents according to the noise magnitude at each timestep
+                    # (this is the forward diffusion process)
+                    noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
+                    # concatenate the noised latents with the mask and the masked latents
+                    latent_model_input = torch.cat([noisy_latents, mask, masked_latents], dim=1)
+
+                    # Get the text embedding for conditioning
+                    encoder_hidden_states = self.text_encoder(batch["input_ids"])[0]
+
+                    # Predict the noise residual
+                    noise_pred = self.unet(latent_model_input, timesteps, encoder_hidden_states).sample
+
+                    # Get the target for loss depending on the prediction type
+                    if self.noise_scheduler.config.prediction_type == "epsilon":
+                        target = noise
+                    elif self.noise_scheduler.config.prediction_type == "v_prediction":
+                        target = self.noise_scheduler.get_velocity(latents, noise, timesteps)
+                    else:
+                        raise ValueError(f"Unknown prediction type {self.noise_scheduler.config.prediction_type}")
+
+                    if self.args.with_prior_preservation:
+                        # Chunk the noise and noise_pred into two parts and compute the loss on each part separately.
+                        noise_pred, noise_pred_prior = torch.chunk(noise_pred, 2, dim=0)
+                        target, target_prior = torch.chunk(target, 2, dim=0)
+
+                        # Compute instance loss
+                        loss = F.mse_loss(noise_pred.float(), target.float(), reduction="none").mean([1, 2, 3]).mean()
+
+                        # Compute prior loss
+                        prior_loss = F.mse_loss(noise_pred_prior.float(), target_prior.float(), reduction="mean")
+
+                        # Add the prior loss to the instance loss.
+                        loss = loss + self.args.prior_loss_weight * prior_loss
+                    else:
+                        loss = F.mse_loss(noise_pred.float(), target.float(), reduction="mean")
+
+                    self.accelerator.backward(loss)
+                    if self.accelerator.sync_gradients:
+                        params_to_clip = (
+                            itertools.chain(self.unet.parameters(), self.text_encoder.parameters())
+                            if self.args.train_text_encoder
+                            else self.unet.parameters()
+                        )
+                        self.accelerator.clip_grad_norm_(params_to_clip, self.args.max_grad_norm)
+                    self.optimizer.step()
+                    self.lr_scheduler.step()
+                    self.optimizer.zero_grad()
+    
+                # Checks if the accelerator has performed an optimization step behind the scenes
+                if self.accelerator.sync_gradients:
+                    progress_bar.update(1)
+                    global_step += 1
+                    if global_step % self.args.checkpointing_steps == 0:
+                        if self.accelerator.is_main_process:
+                            save_path = os.path.join(self.args.output_dir, f"checkpoint-{global_step}")
+                            self.accelerator.save_state(save_path)
+                            self.logger.info(f"Saved state to {save_path}")
+
+                logs = {"loss": loss.detach().item(), "lr": self.lr_scheduler.get_last_lr()[0]}
+                progress_bar.set_postfix(**logs)
+                self.accelerator.log(logs, step=global_step)
+
+                if global_step >= self.args.max_train_steps:
+                    break
+
+
+
+
+
+
 
 
         pass

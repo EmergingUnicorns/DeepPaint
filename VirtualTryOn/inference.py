@@ -7,7 +7,7 @@ from PIL import Image
 from io import BytesIO
 import numpy as np
 from HumanParser import HumanParser
-from utils import *
+from .utils import *
 
 
 class VirtualTryOnInference:

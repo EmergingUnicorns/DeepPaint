@@ -2,6 +2,8 @@ from PIL import Image, ImageDraw
 import random
 import torch
 import numpy as np
+import cv2
+
 
 # generate random masks
 def random_mask(im_shape, ratio=1, mask_full_image=False):
@@ -43,3 +45,23 @@ def prepare_mask_and_masked_image(image, mask):
     masked_image = image * (mask < 0.5)
 
     return mask, masked_image
+
+
+
+def read_img_rgb(path, resize = None):
+    img = cv2.imread(path, cv2.COLOR_BGR2RGB)
+    if (resize is not None):
+        img = cv2.resize(img, resize, interpolation = cv2.INTER_AREA)
+    return img
+
+def convert_numpy_to_PIL(l):
+    p = []
+    for i in l:
+        p.append(Image.fromarray(i))
+    return p
+
+def convert_PIL_to_numpy(l):
+    p = []
+    for i in l:
+        p.append(np.array(i))
+    return p

@@ -37,7 +37,8 @@ from utils import *
 
 class VirtualTryOnTrain:
     def __init__(self) -> None:
-        
+        print ("------ || Virtual Try ON Training || ----------------")
+
         self.logger = get_logger(__name__)
 
         args = get_config_default()
@@ -55,21 +56,19 @@ class VirtualTryOnTrain:
             if args.class_prompt is None:
                 raise ValueError("You must specify prompt for class images.")
 
-        print ("---- Initializing Accelerator --------")
         self.initialize_accelerator()
         if args.train_text_encoder and args.gradient_accumulation_steps > 1 and self.accelerator.num_processes > 1:
             raise ValueError(
                 "Gradient accumulation is not supported when training the text encoder in distributed training. "
                 "Please set gradient_accumulation_steps to 1. This feature will be supported in the future."
             )
-        print ("Done !!")
 
         print ("--------- Setting Seed --------")
         if args.seed is not None:
             set_seed(args.seed)
         print ("Done !!")
 
-        print ("Prior Preservation : " + str(args.with_prior_preservations))
+        print ("Prior Preservation Flag : " + str(args.with_prior_preservations))
         if args.with_prior_preservation:
             print ("Class Data Path : " + str(args.class_data_dir))
             print ("--------------------------------------------------------")
@@ -90,61 +89,66 @@ class VirtualTryOnTrain:
                 )
             print ("--------------------------------------------------------")
 
-            # Handle the repository creation
-            if self.accelerator.is_main_process:
-                if args.output_dir is not None:
-                    os.makedirs(args.output_dir, exist_ok=True)
+        # Handle the repository creation
+        if self.accelerator.is_main_process:
+            print ("Output Dir : " + str(self.args.output_dir))
+            if args.output_dir is not None:
+                os.makedirs(args.output_dir, exist_ok=True)
 
-                if args.push_to_hub:
-                    repo_id = create_repo(
-                        repo_id=args.hub_model_id or Path(args.output_dir).name, exist_ok=True, token=args.hub_token
-                    ).repo_id
+            print ("Push to Hub : " + str(args.push_to_hub))
+            if args.push_to_hub:
+                self.repo_id = create_repo(
+                    repo_id=args.hub_model_id or Path(args.output_dir).name, exist_ok=True, token=args.hub_token
+                ).repo_id
 
-            self.load_tokenizer()
-            self.load_models()
-            self.init_opt_and_lr()
-            self.init_lr_scheduler()
+        self.load_tokenizer()
+        self.load_models()
+        self.init_opt_and_lr()
+        self.init_lr_scheduler()
 
-            if self.args.train_text_encoder:
-                self.unet, self.text_encoder, self.optimizer, self.train_dataloader, self.lr_scheduler = self.accelerator.prepare(
-                    self.unet, self.text_encoder, self.optimizer, self.train_dataloader, self.lr_scheduler
-                )
-            else:
-                self.unet, self.optimizer, self.train_dataloader, self.lr_scheduler = self.accelerator.prepare(
-                    self.unet, self.optimizer, self.train_dataloader, self.lr_scheduler
-                )
-            self.accelerator.register_for_checkpointing(self.lr_scheduler)
+        if self.args.train_text_encoder:
+            self.unet, self.text_encoder, self.optimizer, self.train_dataloader, self.lr_scheduler = self.accelerator.prepare(
+                self.unet, self.text_encoder, self.optimizer, self.train_dataloader, self.lr_scheduler
+            )
+        else:
+            self.unet, self.optimizer, self.train_dataloader, self.lr_scheduler = self.accelerator.prepare(
+                self.unet, self.optimizer, self.train_dataloader, self.lr_scheduler
+            )
+        self.accelerator.register_for_checkpointing(self.lr_scheduler)
 
-            self.weight_dtype = torch.float32
-            if args.mixed_precision == "fp16":
-                self.weight_dtype = torch.float16
-            elif args.mixed_precision == "bf16":
-                self.weight_dtype = torch.bfloat16
+        self.weight_dtype = torch.float32
+        if args.mixed_precision == "fp16":
+            self.weight_dtype = torch.float16
+        elif args.mixed_precision == "bf16":
+            self.weight_dtype = torch.bfloat16
 
-            self.vae.to(self.accelerator.device, dtype=self.weight_dtype)
-            if not self.args.train_text_encoder:
-                self.text_encoder.to(self.accelerator.device, dtype=self.weight_dtype)
+        self.vae.to(self.accelerator.device, dtype=self.weight_dtype)
+        if not self.args.train_text_encoder:
+            self.text_encoder.to(self.accelerator.device, dtype=self.weight_dtype)
 
+        num_update_steps_per_epoch = math.ceil(len(self.train_dataloader) / args.gradient_accumulation_steps)
+        if self.overrode_max_train_steps:
+            self.args.max_train_steps = self.args.num_train_epochs * num_update_steps_per_epoch
+        self.args.num_train_epochs = math.ceil(self.args.max_train_steps / num_update_steps_per_epoch)
 
-            num_update_steps_per_epoch = math.ceil(len(self.train_dataloader) / args.gradient_accumulation_steps)
-            if self.overrode_max_train_steps:
-                self.args.max_train_steps = self.args.num_train_epochs * num_update_steps_per_epoch
-            self.args.num_train_epochs = math.ceil(self.args.max_train_steps / num_update_steps_per_epoch)
+        # We need to initialize the trackers we use, and also store our configuration.
+        # The trackers initializes automatically on the main process.
+        if self.accelerator.is_main_process:
+            self.accelerator.init_trackers("dreambooth", config=vars(self.args))
 
-            # We need to initialize the trackers we use, and also store our configuration.
-            # The trackers initializes automatically on the main process.
-            if self.accelerator.is_main_process:
-                self.accelerator.init_trackers("dreambooth", config=vars(self.args))
-
+        print ("=========== Virtual Try ON is ready for Training. COOL!!!!! ========== \n \n")
 
     def init_lr_scheduler(self):
+        print ("----- Initializing Learning Rate Scheduler -----------")
         # Scheduler and math around the number of training steps.
-        overrode_max_train_steps = False
+        self.overrode_max_train_steps = False
         num_update_steps_per_epoch = math.ceil(len(self.train_dataloader) / self.args.gradient_accumulation_steps)
         if self.args.max_train_steps is None:
             self.args.max_train_steps = self.args.num_train_epochs * num_update_steps_per_epoch
-            overrode_max_train_steps = True
+            self.overrode_max_train_steps = True
 
+        print ("Lr warmup steps : " + str(self.args.lr_warmup_steps * self.args.gradient_accumulation_steps))
+        print ("Number Training Steps : " + str(self.args.max_train_steps * self.args.gradient_accumulation_steps))
         self.lr_scheduler = get_scheduler(
             self.args.lr_scheduler,
             optimizer=self.optimizer,
@@ -152,7 +156,7 @@ class VirtualTryOnTrain:
             num_training_steps=self.args.max_train_steps * self.args.gradient_accumulation_steps,
         )
 
-
+        print ("----------------------------------------------------- \n \n")
 
     def initialize_dreambooth_loaders(self):
         train_dataset = DreamBoothDataset(
@@ -207,10 +211,17 @@ class VirtualTryOnTrain:
 
 
     def init_opt_and_lr(self):
+        print ("----------------- Initialize Optimizer and Learning Rate ------------------------")
         if self.args.scale_lr:
+            print ("Scale Learning Rate : " + str(self.args.scale_lr))
+            print ("Before Scaling : " + str(self.args.learning_rate))
+            print ("Gradient Accumulation Steps : " + str(self.args.gradient_accumulation_steps))
+            print ("Training Batch Size : " + str(self.args.train_batch_size))
+            print ("Accelerator Num Proc : " + str(self.accelerator.num_processes))            
             self.args.learning_rate = (
                 self.args.learning_rate * self.args.gradient_accumulation_steps * self.args.train_batch_size * self.accelerator.num_processes
             )
+            print ("After Scaling Lr : " + str(self.args.learning_rate))
 
         # Use 8-bit Adam for lower memory usage or to fine-tune the model in 16GB GPUs
         if self.args.use_8bit_adam:
@@ -220,14 +231,19 @@ class VirtualTryOnTrain:
                 raise ImportError(
                     "To use 8-bit Adam, please install the bitsandbytes library: `pip install bitsandbytes`."
                 )
-
+            print ("Using 8 bit ADAM Optimizer!")
             optimizer_class = bnb.optim.AdamW8bit
         else:
+            print ("Using Normal ADAM Optimizer!")
             optimizer_class = torch.optim.AdamW
 
         params_to_optimize = (
             itertools.chain(self.unet.parameters(), self.text_encoder.parameters()) if self.args.train_text_encoder else self.unet.parameters()
         )
+        print ("Adam Beta 1 : " + str(self.args.adam_beta1))
+        print ("Adam Beta 2 : " + str(self.args.adam_beta2))
+        print ("Adam Weight Decay : " + str(self.args.adam_weight_decay))
+        print ("Eps : " + str(self.args.adam_epsilon))
         self.optimizer = optimizer_class(
             params_to_optimize,
             lr=self.args.learning_rate,
@@ -235,26 +251,37 @@ class VirtualTryOnTrain:
             weight_decay=self.args.adam_weight_decay,
             eps=self.args.adam_epsilon,
         )
+        print ("-------------------------------------- \n \n")
 
     def load_tokenizer(self):
+        print ("--------- Loading Tokenizer ---------")
         if self.args.tokenizer_name:
+            print ("Tokenizer Name : " + str(self.args.tokenizer_name))
             self.tokenizer = CLIPTokenizer.from_pretrained(self.args.tokenizer_name)
         elif self.args.pretrained_model_name_or_path:
+            print ("Tokenizer from Model : " + str(self.args.pretrained_model_name_or_path))
             self.tokenizer = CLIPTokenizer.from_pretrained(self.args.pretrained_model_name_or_path, subfolder="tokenizer")
+        print ("-------------------------------------- \n \n")
 
     def load_models(self):
+        print ("------------ Loading Models ------------------")
+        print ("Loading Model : " + str(self.args.pretrained_model_name_or_path))
         self.text_encoder = CLIPTextModel.from_pretrained(self.args.pretrained_model_name_or_path, subfolder="text_encoder")
         self.vae = AutoencoderKL.from_pretrained(self.args.pretrained_model_name_or_path, subfolder="vae")
         self.unet = UNet2DConditionModel.from_pretrained(self.args.pretrained_model_name_or_path, subfolder="unet")
 
+        print ("===VAE is freezed===")
         self.vae.requires_grad_(False)
+
         if not self.args.train_text_encoder:
+            print ("===Text Encoder is freezed===")
             self.text_encoder.requires_grad_(False)
 
         if self.args.gradient_checkpointing:
             self.unet.enable_gradient_checkpointing()
             if self.args.train_text_encoder:
                 self.text_encoder.gradient_checkpointing_enable()
+        print ("----------------------------------------------- \n \n")
 
 
     def generate_class_images(self, cur_class_images, class_images_dir):
@@ -295,6 +322,7 @@ class VirtualTryOnTrain:
             torch.cuda.empty_cache()
 
     def initialize_accelerator(self):
+        print ("---- Initializing Accelerator --------")
         logging_dir = Path(self.args.output_dir, self.args.logging_dir)
         project_config = ProjectConfiguration(total_limit=self.args.checkpoints_total_limit)
         self.accelerator = Accelerator(
@@ -304,6 +332,13 @@ class VirtualTryOnTrain:
             logging_dir=logging_dir,
             project_config=project_config,
         )
+        print ("Logging Dir : " + str(logging_dir))
+        print ("Checkpoints Total Limit : " + str(self.args.checkpoints_total_limit))
+        print ("Mixed Precision : " + str(self.args.mixed_precision))
+        print ("Gradient Accumulation Steps : " + str(self.gradient_accumulation_steps))
+        print ("Done !!")
+        print ("--------------------------------------- \n \n")
+
 
     def train(self):
         print ("\n" * 3)        
@@ -422,6 +457,26 @@ class VirtualTryOnTrain:
                 if global_step >= self.args.max_train_steps:
                     break
 
+            self.accelerator.wait_for_everyone()
+
+        # Create the pipeline using using the trained modules and save it.
+        if self.accelerator.is_main_process:
+            pipeline = StableDiffusionPipeline.from_pretrained(
+                self.args.pretrained_model_name_or_path,
+                unet=self.accelerator.unwrap_model(self.unet),
+                text_encoder=self.accelerator.unwrap_model(self.text_encoder),
+            )
+            pipeline.save_pretrained(self.args.output_dir)
+
+            if self.args.push_to_hub:
+                upload_folder(
+                    repo_id=self.repo_id,
+                    folder_path=aself.rgs.output_dir,
+                    commit_message="End of training",
+                    ignore_patterns=["step_*", "epoch_*"],
+                )
+
+        self.accelerator.end_training()
 
 
 

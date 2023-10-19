@@ -1,5 +1,4 @@
 
-from default_config import get_config_default
 import os
 import argparse
 import hashlib
@@ -32,16 +31,19 @@ from diffusers import (
 from diffusers.optimization import get_scheduler
 from diffusers.utils import check_min_version
 
-from data import PromptDataset
-from utils import *
+from .data import PromptDataset, DreamBoothDataset
+from .utils import *
 
 class VirtualTryOnTrain:
-    def __init__(self) -> None:
+    def __init__(self, args):
         print ("------ || Virtual Try ON Training || ----------------")
 
         self.logger = get_logger(__name__)
 
-        args = get_config_default()
+        if (args is None):
+            print ("Please provide arguments!!")
+            exit()
+
         self.args = args
         env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
         if env_local_rank != -1 and env_local_rank != args.local_rank:
@@ -68,7 +70,7 @@ class VirtualTryOnTrain:
             set_seed(args.seed)
         print ("Done !!")
 
-        print ("Prior Preservation Flag : " + str(args.with_prior_preservations))
+        print ("Prior Preservation Flag : " + str(args.with_prior_preservation))
         if args.with_prior_preservation:
             print ("Class Data Path : " + str(args.class_data_dir))
             print ("--------------------------------------------------------")
@@ -104,7 +106,9 @@ class VirtualTryOnTrain:
         self.load_tokenizer()
         self.load_models()
         self.init_opt_and_lr()
+        self.initialize_dreambooth_loaders()
         self.init_lr_scheduler()
+        self.init_noise_scheduler()
 
         if self.args.train_text_encoder:
             self.unet, self.text_encoder, self.optimizer, self.train_dataloader, self.lr_scheduler = self.accelerator.prepare(
@@ -138,6 +142,13 @@ class VirtualTryOnTrain:
 
         print ("=========== Virtual Try ON is ready for Training. COOL!!!!! ========== \n \n")
 
+
+    def init_noise_scheduler(self):
+        print ("-------- Initializing Noise Scheduler --------- ")
+        print ("DDPM Scheduler")
+        self.noise_scheduler = DDPMScheduler.from_pretrained(self.args.pretrained_model_name_or_path, subfolder="scheduler")
+        print ("------------------------------------------------ \n")
+
     def init_lr_scheduler(self):
         print ("----- Initializing Learning Rate Scheduler -----------")
         # Scheduler and math around the number of training steps.
@@ -159,7 +170,8 @@ class VirtualTryOnTrain:
         print ("----------------------------------------------------- \n \n")
 
     def initialize_dreambooth_loaders(self):
-        train_dataset = DreamBoothDataset(
+        print ("-------------- Initializing Dreambooth Loaders ---------------- ")
+        self.train_dataset = DreamBoothDataset(
             instance_data_root=self.args.instance_data_dir,
             instance_prompt=self.args.instance_prompt,
             class_data_root=self.args.class_data_dir if self.args.with_prior_preservation else None,
@@ -205,9 +217,9 @@ class VirtualTryOnTrain:
 
 
         self.train_dataloader = torch.utils.data.DataLoader(
-            train_dataset, batch_size=self.args.train_batch_size, shuffle=True, collate_fn=collate_fn
+            self.train_dataset, batch_size=self.args.train_batch_size, shuffle=True, collate_fn=collate_fn
         )
-
+        print ("----------------------------------------------- \n \n")
 
 
     def init_opt_and_lr(self):
@@ -335,7 +347,7 @@ class VirtualTryOnTrain:
         print ("Logging Dir : " + str(logging_dir))
         print ("Checkpoints Total Limit : " + str(self.args.checkpoints_total_limit))
         print ("Mixed Precision : " + str(self.args.mixed_precision))
-        print ("Gradient Accumulation Steps : " + str(self.gradient_accumulation_steps))
+        print ("Gradient Accumulation Steps : " + str(self.args.gradient_accumulation_steps))
         print ("Done !!")
         print ("--------------------------------------- \n \n")
 
@@ -387,7 +399,7 @@ class VirtualTryOnTrain:
 
                     # Sample noise that we'll add to the latents
                     noise = torch.randn_like(latents)
-                    bsz = latents.shape[0]
+                    bsz = latents.shape[0] # Batch size
                     # Sample a random timestep for each image
                     timesteps = torch.randint(0, self.noise_scheduler.config.num_train_timesteps, (bsz,), device=latents.device)
                     timesteps = timesteps.long()
@@ -471,21 +483,14 @@ class VirtualTryOnTrain:
             if self.args.push_to_hub:
                 upload_folder(
                     repo_id=self.repo_id,
-                    folder_path=aself.rgs.output_dir,
+                    folder_path=self.rgs.output_dir,
                     commit_message="End of training",
                     ignore_patterns=["step_*", "epoch_*"],
                 )
 
         self.accelerator.end_training()
 
-
-
-
-
-
-
         pass
 
-t = VirtualTryOnTrain()
 
         

@@ -69,7 +69,7 @@ class DreamBoothDataset(Dataset):
         self.image_transforms_resize_and_crop = transforms.Compose(
             [
                 transforms.Resize(size, interpolation=transforms.InterpolationMode.BILINEAR),
-                transforms.CenterCrop(size) if center_crop else transforms.RandomCrop(size),
+                transforms.CenterCrop(size) if center_crop else transforms.RandomCrop(size)
             ]
         )
 
@@ -89,7 +89,6 @@ class DreamBoothDataset(Dataset):
         if not instance_image.mode == "RGB":
             instance_image = instance_image.convert("RGB")
         instance_image = self.image_transforms_resize_and_crop(instance_image)
-
         example["PIL_images"] = instance_image
         example["instance_images"] = self.image_transforms(instance_image)
 
@@ -144,7 +143,7 @@ class DataCreation:
         print ("Number of Images to be generated : " + str(target_number)) 
         self.transform = A.Compose([
             A.HorizontalFlip(p=0.5),
-            A.Affine(scale=(0.6, 1.2), rotate = (-45, 45), translate_percent = 0.05)
+            A.Affine(scale=(0.2, 1.0), rotate = (-45, 45), translate_percent = 0.05, keep_ratio = True)
         ])       
         print ("-------------------------------------- \n")
 
@@ -154,9 +153,9 @@ class DataCreation:
 
     def create_augmentation(self, img, save_idx):
         c = 0
-        while (c < 10):
+        while (c < 30):
             transformed_image =self.transform(image=img)['image']
-            transformed_image[transformed_image == 0] = 255
+            # transformed_image[transformed_image == 0] = 255
             cv2.imwrite(self.save_dir + "/cloth_da_" + str(save_idx) + "_" + str(c) + ".png", transformed_image)
             self.c += 1
             c += 1
@@ -169,13 +168,12 @@ class DataCreation:
             img = read_img_rgb(imf, resize = (512, 512))
             masked_img, cloth_mask = self.human_parser.infer(img)
             cloth_img = img * (cloth_mask/255.0)
-            cloth_img = cloth_img + ([255,255,255] - cloth_mask)
+            # cloth_img = cloth_img + ([255,255,255] - cloth_mask)
             non_zero_points = np.argwhere(cloth_mask)
             min_x = np.min(non_zero_points[:, 1])
             max_x = np.max(non_zero_points[:, 1])
             min_y = np.min(non_zero_points[:, 0])
             max_y = np.max(non_zero_points[:, 0])
-            bbox = [min_x, min_y, max_x, max_y]
 
             cropped_region = cloth_img[min_y:max_y, min_x:max_x]
             cropped_region = cv2.resize(cropped_region, (512, 512), interpolation = cv2.INTER_AREA)    

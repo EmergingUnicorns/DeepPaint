@@ -3,7 +3,23 @@ import random
 import torch
 import numpy as np
 import cv2
+from transformers import CLIPSegProcessor, CLIPSegForImageSegmentation
 
+processor = CLIPSegProcessor.from_pretrained("CIDAS/clipseg-rd64-refined")
+model = CLIPSegForImageSegmentation.from_pretrained("CIDAS/clipseg-rd64-refined")
+
+def clipseg_masks(img):
+    size = img.size
+    prompts = ["clothes"]
+    inputs = processor(text=prompts, images=[img] * len(prompts), padding="max_length", return_tensors="pt")
+    # predict
+    with torch.no_grad():
+        outputs = model(**inputs)
+    preds = torch.sigmoid(outputs.logits) > 0.5
+    preds = preds.numpy().astype(np.uint8) * 255
+    preds = cv2.resize(preds, size)
+    preds = Image.fromarray(preds)
+    return preds
 
 # generate random masks
 def random_mask(im_shape, ratio=1, mask_full_image=False):

@@ -37,7 +37,7 @@ from .utils import *
 class VirtualTryOnTrain:
     def __init__(self, args):
         print ("------ || Virtual Try ON Training || ----------------")
-
+        print (args)
         self.logger = get_logger(__name__)
 
         if (args is None):
@@ -194,8 +194,14 @@ class VirtualTryOnTrain:
             masked_images = []
             for example in examples:
                 pil_image = example["PIL_images"]
-                mask = random_mask(pil_image.size, 1, False) # generate a random mask
+                pil_image.save("./check.jpg")
+
+                mask = clipseg_masks(pil_image) # generate a random mask
+                # mask = random_mask(pil_image.size, 1, False) # generate a random mask
+                mask.save("./check1.jpg")
+
                 mask, masked_image = prepare_mask_and_masked_image(pil_image, mask)  # prepare mask and masked image
+
                 masks.append(mask)
                 masked_images.append(masked_image)
 
@@ -456,11 +462,11 @@ class VirtualTryOnTrain:
                 if self.accelerator.sync_gradients:
                     progress_bar.update(1)
                     global_step += 1
-                    if global_step % self.args.checkpointing_steps == 0:
-                        if self.accelerator.is_main_process:
-                            save_path = os.path.join(self.args.output_dir, f"checkpoint-{global_step}")
-                            self.accelerator.save_state(save_path)
-                            self.logger.info(f"Saved state to {save_path}")
+                    # if global_step % self.args.checkpointing_steps == 0:
+                    #     if self.accelerator.is_main_process:
+                    #         save_path = os.path.join(self.args.output_dir, f"checkpoint-{global_step}")
+                    #         self.accelerator.save_state(save_path)
+                    #         self.logger.info(f"Saved state to {save_path}")
 
                 logs = {"loss": loss.detach().item(), "lr": self.lr_scheduler.get_last_lr()[0]}
                 progress_bar.set_postfix(**logs)

@@ -52,6 +52,7 @@ class DreamBoothDataset(Dataset):
 
         self.instance_images_path = list(Path(instance_data_root).iterdir())
         self.num_instance_images = len(self.instance_images_path)
+        print (self.num_instance_images)
         self.instance_prompt = instance_prompt
         self._length = self.num_instance_images
 
@@ -114,3 +115,82 @@ class DreamBoothDataset(Dataset):
             ).input_ids
 
         return example
+
+import os
+import glob
+from HumanParser import HumanParser
+from .utils import *
+import albumentations as A
+
+def MakeDir(path):
+    if (not os.path.exists(path)):
+        os.mkdir(path)
+
+class DataCreation:
+    def __init__(self, instance_dir, save_dir, target_number = 20) -> None:
+        print ("-------- DATA CREATION INITIALIZATION ----------")
+        print ("Instance Dir : " + str(instance_dir))
+        MakeDir(save_dir)
+
+        self.all_imf = []
+        self.all_imf += glob.glob(instance_dir + "*.png")
+        self.all_imf += glob.glob(instance_dir + "*.jpeg")
+        self.all_imf += glob.glob(instance_dir + "*.jpg")
+
+        print ("Number of Images found : " + str(len(self.all_imf)))
+        self.save_dir = save_dir
+        self.human_parser = HumanParser()
+        self.target_number = target_number
+        print ("Number of Images to be generated : " + str(target_number)) 
+        self.transform = A.Compose([
+            A.HorizontalFlip(p=0.5),
+            A.Affine(scale=(0.6, 1.2), rotate = (-45, 45), translate_percent = 0.05)
+        ])       
+        print ("-------------------------------------- \n")
+
+    def reset(self):
+        self.c = 0
+        self.cp = []
+
+    def create_augmentation(self, img, save_idx):
+        c = 0
+        while (c < 10):
+            transformed_image =self.transform(image=img)['image']
+            transformed_image[transformed_image == 0] = 255
+            cv2.imwrite(self.save_dir + "/cloth_da_" + str(save_idx) + "_" + str(c) + ".png", transformed_image)
+            self.c += 1
+            c += 1
+
+
+    def create(self):
+        print ("Creating Dataset!!")
+        self.reset()
+        for idx, imf in enumerate(self.all_imf):
+            img = read_img_rgb(imf, resize = (512, 512))
+            masked_img, cloth_mask = self.human_parser.infer(img)
+            cloth_img = img * (cloth_mask/255.0)
+            cloth_img = cloth_img + ([255,255,255] - cloth_mask)
+            non_zero_points = np.argwhere(cloth_mask)
+            min_x = np.min(non_zero_points[:, 1])
+            max_x = np.max(non_zero_points[:, 1])
+            min_y = np.min(non_zero_points[:, 0])
+            max_y = np.max(non_zero_points[:, 0])
+            bbox = [min_x, min_y, max_x, max_y]
+
+            cropped_region = cloth_img[min_y:max_y, min_x:max_x]
+            cropped_region = cv2.resize(cropped_region, (512, 512), interpolation = cv2.INTER_AREA)    
+            cv2.imwrite(self.save_dir + "/cloth_" + str(idx) + ".png", cropped_region)
+            self.cp.append(self.save_dir + "/cloth_" + str(idx) + ".png")
+            self.c += 1
+        
+        if (self.c >=  self.target_number):
+            print ("Dataset Created : " + str(self.c))
+        else:
+            print ("Need to generate augmented dataset : " + str(self.target_number - self.c))
+            random.shuffle(self.cp)
+            for idx in range(len(self.cp)):
+                img = read_img_rgb(self.cp[idx])
+                self.create_augmentation(img, idx)
+                if (self.c >= self.target_number):
+                    break
+

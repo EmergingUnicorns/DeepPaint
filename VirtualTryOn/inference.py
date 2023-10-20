@@ -24,7 +24,7 @@ class VirtualTryOnInference:
         self.device = device
         self.model = StableDiffusionInpaintPipeline.from_pretrained(
             model_path,
-            torch_dtype = torch.float16,
+            torch_dtype = torch.float32,
             safety_checker = None
         )
         self.model = self.model.to(device)

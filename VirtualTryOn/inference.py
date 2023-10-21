@@ -7,6 +7,9 @@ from PIL import Image
 from io import BytesIO
 import numpy as np
 from HumanParser import HumanParser
+from accelerate import Accelerator
+from accelerate.logging import get_logger
+from accelerate.utils import ProjectConfiguration, set_seed
 from .utils import *
 
 
@@ -22,13 +25,13 @@ class VirtualTryOnInference:
         print ("Model Path : " + str(model_path))
         print ("Device : " + str(device))
         self.device = device
-        self.model = StableDiffusionInpaintPipeline.from_pretrained(
+        pipeline = StableDiffusionInpaintPipeline.from_pretrained(
             model_path,
             torch_dtype = torch.float32,
             safety_checker = None
         )
+        self.model = pipeline
         self.model = self.model.to(device)
-
         self.human_parser = HumanParser()
         self.run_on = run_on
         self.num_inference_steps = num_inference_steps
@@ -46,15 +49,16 @@ class VirtualTryOnInference:
         img = img.astype(np.uint8)
         masked_img = masked_img.astype(np.uint8)
         cloth_mask = cloth_mask.astype(np.uint8)
-        # print (img.shape)
-        # print (masked_img.shape)
-        # print (cloth_mask.shape)
 
-        # cv2.imwrite("./img.jpg", img)
-        # cv2.imwrite("./masked.jpg", masked_img)
-        # cv2.imwrite("./cloth_mask.jpg", cloth_mask)
+        cv2.imwrite("./masked_img1.jpg", masked_img)
+        masked_img = img * (cloth_mask/255)
+        masked_img = (masked_img/255) + (1 - (cloth_mask/255))
+        masked_img = masked_img * 255.0
+        masked_img = masked_img.astype(np.uint8)
+        cv2.imwrite("./masked_img.jpg", masked_img)
         # exit()
 
+        
         img, masked_img, cloth_mask = convert_numpy_to_PIL([img, masked_img, cloth_mask])
         print ("Running the model!")
         new_img = self.model(
@@ -67,11 +71,11 @@ class VirtualTryOnInference:
         ).images[0]
 
 
-        new_img = np.array(new_img)
+        final_image = np.array(new_img)
 
-        # Refinement Process
-        img, cloth_mask = convert_PIL_to_numpy([img, cloth_mask])
-        final_image = new_img * (cloth_mask/255.0) + img * ((np.array([255, 255, 255]) - cloth_mask)/255.0)
+        # # Refinement Process
+        # img, cloth_mask = convert_PIL_to_numpy([img, cloth_mask])
+        # final_image = new_img * (cloth_mask/255.0) + img * ((np.array([255, 255, 255]) - cloth_mask)/255.0)
         return final_image
 
 

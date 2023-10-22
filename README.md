@@ -53,8 +53,19 @@
    <!--<td><img src="./Scshot/trip_end.png" align="right" alt="4" width =  279px height = 496px></td>-->
   </tr>
   <tr>
-    <td> <img src="./DebugImages/TargetClothes/Jackets/Screenshot 2023-04-28 at 4.45.58 PM.png"  alt="1" height = 496px ></td>
-    <td> <img src="./ResultsPredictions/Shirt/test5/shirt_test5img1.jpg"  alt="1" height = 496px ></td>
-   <!--<td><img src="./Scshot/trip_end.png" align="right" alt="4" width =  279px height = 496px></td>-->
+    <td> <img src="./DebugImages/TargetClothes/Jackets/test1/Screenshot 2023-04-28 at 4.45.58 PM.png"  alt="1" height = 496px ></td>
+    <td> <img src="./ResultsPredictions/Jackets/test1/jacket_test1img1.jpg"  alt="1" height = 496px ></td>
+    <td> <img src="./ResultsPredictions/Jackets/test1/jacket_test1img2.jpg"  alt="1" height = 496px ></td>
+    <td> <img src="./ResultsPredictions/Jackets/test1/jacket_test1img3.jpg"  alt="1" height = 496px ></td>
+    <td> <img src="./ResultsPredictions/Jackets/test1/jacket_test1img4.jpg"  alt="1" height = 496px ></td>
+    <!--<td><img src="./Scshot/trip_end.png" align="right" alt="4" width =  279px height = 496px></td>-->
+  </tr>
+  <tr>
+    <td> <img src="./DebugImages/TargetClothes/Jackets/test2/Screenshot 2023-04-29 at 4.05.15 PM.png"  alt="1" height = 496px ></td>
+    <td> <img src="./ResultsPredictions/Jackets/type2/jacket_test2img1.jpg"  alt="1" height = 496px ></td>
+    <td> <img src="./ResultsPredictions/Jackets/type2/jacket_test2img2.jpg"  alt="1" height = 496px ></td>
+    <td> <img src="./ResultsPredictions/Jackets/type2/jacket_test2img3.jpg"  alt="1" height = 496px ></td>
+    <td> <img src="./ResultsPredictions/Jackets/type2/jacket_test2img4.jpg"  alt="1" height = 496px ></td>
+    <!--<td><img src="./Scshot/trip_end.png" align="right" alt="4" width =  279px height = 496px></td>-->
   </tr>
 </table>

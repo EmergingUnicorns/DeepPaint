@@ -196,8 +196,8 @@ class VirtualTryOnTrain:
                 pil_image = example["PIL_images"]
                 pil_image.save("./check.jpg")
 
-                mask = clipseg_masks(pil_image) # generate a random mask
-                # mask = random_mask(pil_image.size, 1, False) # generate a random mask
+                # mask = clipseg_masks(pil_image) # generate a random mask
+                mask = random_mask(pil_image, pil_image.size, 1, False) # generate a random mask
                 mask.save("./check1.jpg")
 
                 mask, masked_image = prepare_mask_and_masked_image(pil_image, mask)  # prepare mask and masked image

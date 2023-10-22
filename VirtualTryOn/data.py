@@ -120,6 +120,7 @@ import glob
 from HumanParser import HumanParser
 from .utils import *
 import albumentations as A
+from transformers import CLIPSegProcessor, CLIPSegForImageSegmentation
 
 def MakeDir(path):
     if (not os.path.exists(path)):
@@ -143,8 +144,12 @@ class DataCreation:
         print ("Number of Images to be generated : " + str(target_number)) 
         self.transform = A.Compose([
             A.HorizontalFlip(p=0.5),
-            A.Affine(scale=(0.2, 1.0), rotate = (-45, 45), translate_percent = 0.05, keep_ratio = True)
-        ])       
+            A.Affine(scale=(0.1, 0.5), translate_percent = 0.05, keep_ratio = True)
+        ])
+
+        self.processor = CLIPSegProcessor.from_pretrained("CIDAS/clipseg-rd64-refined")
+        self.model = CLIPSegForImageSegmentation.from_pretrained("CIDAS/clipseg-rd64-refined")
+
         print ("-------------------------------------- \n")
 
     def reset(self):
@@ -160,13 +165,28 @@ class DataCreation:
             self.c += 1
             c += 1
 
+    def clipseg_masks(self, img):
+        size = img.shape[:2]
+        prompts = ["clothes"]
+        inputs = self.processor(text=prompts, images=[img] * len(prompts), padding="max_length", return_tensors="pt")
+        # predict
+        with torch.no_grad():
+            outputs = model(**inputs)
+        preds = torch.sigmoid(outputs.logits) > 0.5
+        preds = preds.numpy().astype(np.uint8) * 255
+        preds = cv2.resize(preds, size)
+        preds = cv2.cvtColor(preds, cv2.COLOR_GRAY2RGB)
+        # preds = Image.fromarray(preds)
+        return preds
+
 
     def create(self):
         print ("Creating Dataset!!")
         self.reset()
         for idx, imf in enumerate(self.all_imf):
             img = read_img_rgb(imf, resize = (512, 512))
-            masked_img, cloth_mask = self.human_parser.infer(img)
+            # masked_img, cloth_mask = self.human_parser.infer(img)
+            cloth_mask = self.clipseg_masks(img)
             cloth_img = img * (cloth_mask/255.0)
             # cloth_img = cloth_img + ([255,255,255] - cloth_mask)
             non_zero_points = np.argwhere(cloth_mask)

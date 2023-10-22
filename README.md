@@ -1,6 +1,6 @@
 # DeepPaint
 - Unofficial Implementation of DeepPaint
-- Paper Link:
+- Paper Link: https://arxiv.org/pdf/2305.01257.pdf
 
 ## Results
 
